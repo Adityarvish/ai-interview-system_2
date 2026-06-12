@@ -45,6 +45,20 @@ async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
     t_boot = time.perf_counter()
 
+    # FIX #6: Fire-and-forget create_task() calls (warmup, save_interaction, semantic
+    # eval, deliver_audio) raise unhandled exceptions that silently print to stderr.
+    # Register a global handler so they're captured in the structured log instead.
+    def _handle_task_exception(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        exc = context.get("exception")
+        logger.error(
+            "[ASYNCIO] Unhandled background task exception: %s | %s",
+            context.get("message"),
+            exc,
+            exc_info=exc if exc else False,
+        )
+
+    asyncio.get_event_loop().set_exception_handler(_handle_task_exception)
+
     # FIX #4: init_db() MUST run before add_semantic_eval_tables()
     init_db()
     logger.info(f"[BOOT] Database initialised in {int((time.perf_counter() - t_boot)*1000)} ms")
@@ -107,7 +121,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_warmup_task())
     logger.info("[BOOT] Background model warm-up + cleanup loop spawned")
     logger.info(f"[BOOT] Frontend dir: {FRONTEND_DIR}")
-    logger.info(f"[BOOT] API docs: http://{Config.FLASK_HOST}:{Config.FLASK_PORT}/docs")
+    logger.info(f"[BOOT] API docs: http://{Config.HOST}:{Config.PORT}/docs")
 
     yield  # ── application runs here ─────────────────────────────────────────
 
@@ -195,8 +209,8 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "main:socket_app",
-        host=Config.FLASK_HOST,
-        port=Config.FLASK_PORT,
+        host=Config.HOST,
+        port=Config.PORT,
         reload=False,
         log_level="info",
     )

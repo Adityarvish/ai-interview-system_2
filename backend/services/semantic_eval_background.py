@@ -50,10 +50,16 @@ logger = logging.getLogger(__name__)
 # Per-interview semaphore pool — limits concurrent evaluations per interview
 _SEMAPHORES: Dict[str, asyncio.Semaphore] = {}
 _MAX_CONCURRENT_PER_INTERVIEW = 2
-_SEM_LOCK = asyncio.Lock()
+# FIX #4: asyncio.Lock() must NOT be created at module import time (before an event
+# loop exists). Initialise lazily on first use inside a running coroutine instead.
+_SEM_LOCK: Optional[asyncio.Lock] = None
 
 
 async def _get_semaphore(interview_id: str) -> asyncio.Semaphore:
+    global _SEM_LOCK
+    # Lazy initialisation — safe because this always runs inside the event loop.
+    if _SEM_LOCK is None:
+        _SEM_LOCK = asyncio.Lock()
     async with _SEM_LOCK:
         if interview_id not in _SEMAPHORES:
             _SEMAPHORES[interview_id] = asyncio.Semaphore(_MAX_CONCURRENT_PER_INTERVIEW)
@@ -105,10 +111,18 @@ async def run_semantic_eval_background(
 
             # ── Persist to database ────────────────────────────────────────
             db = SemanticEvalDBService()
-            await asyncio.gather(
+            # FIX #1: gather with return_exceptions=True was silently swallowing
+            # DB errors. Now we inspect the results and log any exceptions.
+            gather_results = await asyncio.gather(
                 db.save_question_evaluation(result),
                 return_exceptions=True,
             )
+            for r in gather_results:
+                if isinstance(r, Exception):
+                    logger.error(
+                        f"[BG-EVAL] DB save failed for {interview_id} Q{question_id}: {r}",
+                        exc_info=r,
+                    )
             # Update running skill score aggregate
             await db.update_skill_scores(interview_id)
 

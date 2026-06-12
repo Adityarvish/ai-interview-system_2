@@ -27,9 +27,9 @@ class Config:
     GROQ_PRIMARY_MODEL  = os.environ.get('GROQ_PRIMARY_MODEL',  'llama-3.3-70b-versatile')
     GROQ_FALLBACK_MODEL = os.environ.get('GROQ_FALLBACK_MODEL', 'llama-3.1-8b-instant')
 
-    # Flask / Uvicorn
-    FLASK_HOST = os.environ.get('FLASK_HOST', '0.0.0.0')
-    FLASK_PORT = int(os.environ.get('FLASK_PORT', 5000))
+    # FIX #8: renamed from FLASK_HOST / FLASK_PORT — this is a FastAPI/uvicorn app.
+    HOST = os.environ.get('HOST', os.environ.get('FLASK_HOST', '0.0.0.0'))
+    PORT = int(os.environ.get('PORT', os.environ.get('FLASK_PORT', 5000)))
 
     # Interview settings
     MAX_INTERVIEW_DURATION = int(os.environ.get('MAX_INTERVIEW_DURATION', 2700))  # 45 minutes

@@ -45,7 +45,14 @@ def _save_question_eval_sync(result: QuestionEvalResult) -> Dict:
             )
             session.add(row)
 
-        row.stage                     = result.concept_coverage.details.get("stage", "unknown")
+        # FIX #5: Previously dug `stage` out of concept_coverage.details, which is
+        # not guaranteed to contain it. Use the top-level `stage` attribute on the
+        # result object (passed through from run_semantic_eval_background), with the
+        # details dict as a fallback only.
+        row.stage = (
+            getattr(result, "stage", None)
+            or result.concept_coverage.details.get("stage", "unknown")
+        )
         row.question_text             = result.question
         row.transcript_raw            = result.transcript_raw
         row.transcript_clean          = result.transcript_clean

@@ -29,8 +29,11 @@ logger = logging.getLogger(__name__)
 # ── Socket.IO server ───────────────────────────────────────────────────────────
 sio = socketio.AsyncServer(
     cors_allowed_origins="*",
-    logger=True,
-    engineio_logger=True,
+    # FIX #2: logger=True / engineio_logger=True log every socket event at DEBUG
+    # level, including the full base64 audio payload on each audio_chunk event.
+    # This floods stdout, bloats log files, and can cause server instability.
+    logger=False,
+    engineio_logger=False,
     max_http_buffer_size=10 * 1024 * 1024,
     ping_timeout=300,
     ping_interval=25,

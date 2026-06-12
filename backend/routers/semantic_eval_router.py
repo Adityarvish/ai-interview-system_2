@@ -166,10 +166,13 @@ async def evaluate_now(body: EvaluateNowRequest):
     NOTE: This runs synchronously (awaited) — use BackgroundTask path in production.
     """
     from services.semantic_evaluator import SemanticEvaluationEngine
-    from services.llm_service import OllamaService
+    # FIX #3: OllamaService is just an alias for GroqService (set at the bottom of
+    # llm_service.py). Importing by the alias is misleading and fragile — use the
+    # real class name so the intent is clear and future renames don't silently break.
+    from services.llm_service import GroqService
 
     t0  = time.perf_counter()
-    llm = OllamaService()
+    llm = GroqService()
 
     eval_engine = SemanticEvaluationEngine(llm_fn=llm.generate_short)
 
