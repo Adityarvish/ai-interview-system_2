@@ -19,6 +19,10 @@ from services.interview_engine import InterviewEngine
 from services.evaluator import EvaluatorService
 from services.speech_to_text import stt_service
 from services.text_to_speech import tts_service
+from services.semantic_eval_background import (   # ── NEW ──
+    run_semantic_eval_background,
+    cleanup_interview_semaphore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,7 @@ def _cleanup_session(interview_id: str):
     CANCELLED_INTERVIEWS.discard(interview_id)
     _PROCESSING_INTERVIEWS.discard(interview_id)
     _EVALUATING_INTERVIEWS.discard(interview_id)
+    cleanup_interview_semaphore(interview_id)   # ── NEW ── release semaphore
 
 
 def _delete_file_safe(path: str):
@@ -295,8 +300,9 @@ async def _handle_audio_bytes(sid: str, interview_id: str, audio_bytes: bytes,
                 return
 
             # ── Persist interaction ───────────────────────────────────────────
-            current_q = (engine.state.questions_asked[-1]
-                         if engine.state.questions_asked else '')
+            current_q     = (engine.state.questions_asked[-1]
+                             if engine.state.questions_asked else '')
+            question_count = len(engine.state.questions_asked)  # ── NEW ── captured before process_answer
             await loop.run_in_executor(None, engine.process_answer, transcript)
 
             async def _save_interaction():
@@ -316,6 +322,28 @@ async def _handle_audio_bytes(sid: str, interview_id: str, audio_bytes: bytes,
                     logger.error(f"[DB] save_interaction failed: {e}")
 
             asyncio.create_task(_save_interaction())
+
+            # ── Trigger background semantic evaluation ────────────────────────
+            # Fires immediately and returns — evaluation runs concurrently while
+            # the next question is already being generated and sent.
+            if not _is_cancelled(interview_id) and current_q:
+                asyncio.create_task(
+                    run_semantic_eval_background(
+                        interview_id    = interview_id,
+                        question_id     = question_count,
+                        question        = current_q,
+                        transcript_raw  = transcript,
+                        job_description = engine.candidate_info.get('job_description', ''),
+                        resume_context  = engine.candidate_info.get('resume_text', ''),
+                        stage           = engine.state.stage,
+                        llm_fn          = engine.llm.generate_short,
+                    )
+                )
+                logger.info(
+                    f"[EVAL] [{interview_id}] Background semantic eval queued "
+                    f"for Q{question_count}: '{current_q[:60]}'"
+                )
+            # ── End background eval trigger ───────────────────────────────────
 
             if _is_cancelled(interview_id):
                 return
@@ -616,7 +644,7 @@ async def end_interview(sid, data):
                 'message': 'Failed to generate evaluation. Please try again.',
             }, room=interview_id)
         finally:
-            _cleanup_session(interview_id)
+            _cleanup_session(interview_id)   # ── cleanup_interview_semaphore called inside here
 
     asyncio.create_task(_finalize())
 
@@ -689,6 +717,6 @@ async def cancel_interview(sid, data):
                 'message': 'Failed to generate evaluation.',
             }, room=interview_id)
         finally:
-            _cleanup_session(interview_id)
+            _cleanup_session(interview_id)   # ── cleanup_interview_semaphore called inside here
 
     asyncio.create_task(_cancel())
